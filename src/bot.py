@@ -1,4 +1,6 @@
 import os
+import re
+import pickle
 from dotenv import load_dotenv
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
@@ -13,6 +15,11 @@ from sentence_transformers import CrossEncoder
 load_dotenv()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHROMA_PATH = os.path.join(BASE_DIR, "chroma_db")
+BM25_PATH = os.path.join(BASE_DIR, "bm25_retriever.pkl")
+
+# Load BM25 Retriever
+with open(BM25_PATH, "rb") as f:
+    bm25_retriever = pickle.load(f)
 
 def get_hr_bot():
     print("Đang khởi động LLM...")
@@ -33,46 +40,49 @@ def get_hr_bot():
     # 🌟 CUSTOM FUNCTION: TỰ VIẾT RE-RANKER 
     # ==========================================
     def retrieve_and_rerank(query: str) -> str:
-        # Bước A: Tìm 10 đoạn văn từ Vector DB
-        docs = base_retriever.invoke(query)
+        # 1. Thu thập từ 2 nguồn (Dense + Sparse)
+        dense_docs = base_retriever.invoke(query)
+        sparse_docs = bm25_retriever.invoke(query)
+        all_docs = dense_docs + sparse_docs
         
-        if not docs:
-            return ""
+        # 2. Lọc trùng lặp (Deduplication) dựa trên nội dung
+        unique_docs = []
+        seen_content = set()
+        for doc in all_docs:
+            if doc.page_content not in seen_content:
+                unique_docs.append(doc)
+                seen_content.add(doc.page_content)
+                
+        if not unique_docs: return ""
 
-        # Bước B: Ghép cặp (Câu hỏi, Đoạn văn) để Giáo sư chấm điểm
-        pairs = [[query, doc.page_content] for doc in docs]
+        # 3. Đưa cho Giáo sư chấm điểm
+        pairs = [[query, doc.page_content] for doc in unique_docs]
         scores = reranker_model.predict(pairs)
         
-        # Bước C: Gắn điểm số vào tài liệu và sắp xếp từ cao xuống thấp
-        scored_docs = list(zip(docs, scores))
+        scored_docs = list(zip(unique_docs, scores))
         scored_docs.sort(key=lambda x: x[1], reverse=True)
-        
-        # Bước D: Chỉ lấy 3 đoạn văn điểm cao nhất và gộp thành chuỗi Text
+
         top_3_docs = [doc for doc, score in scored_docs[:3]]
         
+        # 4. Gắn Metadata (Chương, Điều) vào Text
         formatted_contexts = []
         for i, doc in enumerate(top_3_docs):
-            # Lấy thông tin từ Metadata (Nếu không có thì để trống)
             meta = doc.metadata
-            h1 = meta.get("Chuong", "")
-            h2 = meta.get("Muc", "")
-            h3 = meta.get("Dieu", "")
+            chuong = meta.get("Chuong", "")
+            muc = meta.get("Muc", "")
+            dieu = meta.get("Dieu", "")
             source = meta.get("source", "Tài liệu nội bộ")
             
-            # Nối các Header lại thành chuỗi phân cấp (Ví dụ: Chương III > Điều 105)
-            headers = [h for h in [h1, h2, h3] if h]
+            headers = [h for h in [chuong, muc, dieu] if h]
             hierarchy = " > ".join(headers) if headers else "Nội dung chung"
             
-            # Format lại đoạn văn cho LLM dễ đọc
             chunk_str = f"--- TÀI LIỆU SỐ {i+1} ---\n"
             chunk_str += f"[Nguồn]: {source}\n"
-            chunk_str += f"[Vị trí]: {hierarchy}\n"
             chunk_str += f"[Nội dung]: {doc.page_content}"
             
             formatted_contexts.append(chunk_str)
             
-        final_context = "\n\n".join(formatted_contexts)
-        return final_context
+        return "\n\n".join(formatted_contexts)
     # ==========================================
 
     # Kịch bản 1: Viết lại câu hỏi

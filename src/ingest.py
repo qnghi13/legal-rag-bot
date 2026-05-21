@@ -40,7 +40,7 @@ def normalize_legal_headings(text):
     
     # 2. Gắn lại thẻ Markdown chuẩn xác dựa vào Keyword của Luật
     # Bắt chữ "Chương" + số La Mã ở đầu dòng -> Gắn thẻ H1 (#)
-    text = re.sub(r'(?m)^(Chương\s+[IVXLCDM]+.*)', r'# \1', text)
+    text = re.sub(r'(?m)^(Chương\s+[IVXLCDM]+.*?)\s*[\r\n]+\s*(?!(?:Điều|Mục|Chương))(.+)', r'# \1 - \2', text)
     
     # Bắt chữ "Mục" + số ở đầu dòng -> Gắn thẻ H2 (##)
     text = re.sub(r'(?m)^(Mục\s+\d+.*)', r'## \1', text)
@@ -111,6 +111,17 @@ def load_and_chunk_folder(folder_path):
                 
             # Bước D: Tách nhỏ các đoạn văn còn quá dài
             chunks = text_splitter.split_documents(md_docs)
+            for chunk in chunks:
+                chuong = chunk.metadata.get("Chuong", "")
+                muc = chunk.metadata.get("Muc", "")
+                dieu = chunk.metadata.get("Dieu", "")
+                
+                # Tạo một "Bảng tên" cho Chunk
+                header_tag = f"[{chuong} | {muc} | {dieu}]".replace(" |  | ", " | ").strip(" | ")
+                
+                # Dán Bảng tên lên ĐẦU đoạn nội dung
+                chunk.page_content = f"{header_tag}\n{chunk.page_content}"
+
             final_chunks.extend(chunks)
             
         except Exception as e:
