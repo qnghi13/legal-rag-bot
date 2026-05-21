@@ -49,8 +49,29 @@ def get_hr_bot():
         
         # Bước D: Chỉ lấy 3 đoạn văn điểm cao nhất và gộp thành chuỗi Text
         top_3_docs = [doc for doc, score in scored_docs[:3]]
-        final_context = "\n\n".join(doc.page_content for doc in top_3_docs)
         
+        formatted_contexts = []
+        for i, doc in enumerate(top_3_docs):
+            # Lấy thông tin từ Metadata (Nếu không có thì để trống)
+            meta = doc.metadata
+            h1 = meta.get("Chuong", "")
+            h2 = meta.get("Muc", "")
+            h3 = meta.get("Dieu", "")
+            source = meta.get("source", "Tài liệu nội bộ")
+            
+            # Nối các Header lại thành chuỗi phân cấp (Ví dụ: Chương III > Điều 105)
+            headers = [h for h in [h1, h2, h3] if h]
+            hierarchy = " > ".join(headers) if headers else "Nội dung chung"
+            
+            # Format lại đoạn văn cho LLM dễ đọc
+            chunk_str = f"--- TÀI LIỆU SỐ {i+1} ---\n"
+            chunk_str += f"[Nguồn]: {source}\n"
+            chunk_str += f"[Vị trí]: {hierarchy}\n"
+            chunk_str += f"[Nội dung]: {doc.page_content}"
+            
+            formatted_contexts.append(chunk_str)
+            
+        final_context = "\n\n".join(formatted_contexts)
         return final_context
     # ==========================================
 

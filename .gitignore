@@ -1,6 +1,6 @@
 venv/
 src/__pycache__/
-
+task.md
 .env
 
 chroma_db/
