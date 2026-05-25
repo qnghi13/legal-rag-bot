@@ -6,8 +6,8 @@ import streamlit as st
 from langchain_core.messages import HumanMessage, AIMessage
 from src.bot import get_hr_bot
 
-st.set_page_config(page_title="HR Copilot VN", page_icon="🤖")
-st.title("🤖 Trợ lý Nhân sự TECH-VN (Có Trí Nhớ)")
+st.set_page_config(page_title="Labor Law Bot", page_icon="🤖")
+st.title("Chat bot luật Lao động Việt Nam")
 st.markdown("Xin chào! Tôi có thể giúp gì cho bạn?")
 
 @st.cache_resource
@@ -49,7 +49,7 @@ if prompt := st.chat_input("Nhập câu hỏi..."):
                 st.markdown(bot_reply)
                 
                 # HIỂN THỊ LẠI Ô XEM TÀI LIỆU Ở ĐÂY
-                with st.expander("📄 Xem tài liệu trích xuất (Debug)"):
+                with st.expander("📄 Xem tài liệu trích xuất"):
                     if context_used.strip() == "":
                         st.warning("Không tìm thấy ngữ cảnh nào phù hợp trong PDF.")
                     else:

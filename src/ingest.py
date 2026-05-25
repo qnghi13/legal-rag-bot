@@ -70,10 +70,15 @@ def process_file_to_markdown(file_path):
             
     return ""
 
-def load_and_chunk_folder(folder_path):
+def load_and_chunk_folder(
+    folder_path,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+):
     print(f"📂 Đang quét toàn bộ file trong thư mục: {folder_path}...")
+    print(f"   Chunk size={chunk_size}, overlap={chunk_overlap}")
     final_chunks = []
-    
+
     # 2. CẤU HÌNH TÁCH MARKDOWN (SEMANTIC CHUNKING)
     headers_to_split_on = [
         ("#", "Chuong"),
@@ -81,12 +86,12 @@ def load_and_chunk_folder(folder_path):
         ("###", "Dieu"),
     ]
     markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
-    
+
     # 3. CẤU HÌNH TÁCH TEXT CHO CÁC ĐOẠN QUÁ DÀI
     # Sau khi cắt theo Heading, nếu có 1 chương dài 5000 chữ, ta phải cắt nhỏ nó ra tiếp
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
         separators=["\n\n", "\n", ".", " ", ""]
     )
     
