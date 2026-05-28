@@ -12,13 +12,13 @@ An advanced, AI-powered conversational agent designed to provide highly accurate
 ## 1. Project Overview
 Understanding labor law can be difficult for students who have never worked before and for people who are just entering the job market. Important topics such as employment contracts, probation periods, overtime regulations, salaries, insurance, and employee rights are often buried inside long and complex legal documents written in formal language.
 
-The **Legal RAG Bot** was built to make Vietnamese labor law more accessible and easier to understand. By ingesting raw legal documents such as PDFs, text files, and scanned images, the system can understand the hierarchical structure of legal documents (Chapters, Sections, Articles) and provide accurate, context-aware answers to user questions. This helps students and new employees quickly find reliable legal information without needing to manually search through hundreds of pages of regulations.
+The **Legal RAG Bot** was built to make Vietnamese labor law more accessible and easier to understand. By ingesting raw legal documents such as PDFs, text files, and scanned images, the system can understand the hierarchical structure of legal documents (Chapters, Sections, Articles, Clauses) and provide accurate, context-aware answers to user questions. This helps students and new employees quickly find reliable legal information without needing to manually search through hundreds of pages of regulations.
 
 When a user asks a question, the system searches its database, retrieves the most relevant legal clauses, and uses high-speed Large Language Models (**Groq**) to synthesize a coherent, accurate, and professional answer.
 
 ## 2. Current Features
 - **Intelligent Data Ingestion & OCR:** Automatically converts PDFs to Markdown. If a scanned PDF is detected, it triggers Tesseract OCR to extract text from images.
-- **Semantic Chunking:** Preserves the legal context by splitting documents based on Markdown headers (Chapter, Section, Article) rather than blind character counts.
+- **Semantic Chunking:** Preserves the legal context by splitting documents based on Markdown headers (Chapter, Section, Article, Clause) rather than blind character counts.
 - **Hybrid Search (Retrieval):** Combines Semantic Search (Dense retrieval via **ChromaDB** & `vi-sbert`) with Keyword Search (Sparse retrieval via **BM25**) to maximize finding exact legal matches.
 - **Cross-Encoder Re-ranking:** Uses `BAAI/bge-reranker-v2-m3` to re-score and filter the retrieved documents, ensuring only the most highly relevant context is sent to the LLM.
 - **Conversational Memory:** Automatically rephrases user queries based on chat history to maintain context in multi-turn conversations.
@@ -42,7 +42,7 @@ This pipeline is executed whenever new legal documents are added to the system.
        [ Text Extraction (PyMuPDF4LLM / Tesseract OCR) ]
                            │
                            ▼
-       [ Semantic Chunking (Split by Chương, Mục, Điều) ]
+       [ Semantic Chunking (Split by Chương, Mục, Điều, Khoản) ]
                            │
              ┌─────────────┴─────────────┐
              ▼                           ▼
@@ -79,7 +79,7 @@ This pipeline runs in real-time when a user interacts with the Chatbot UI.
           [ Cross-Encoder (BAAI/bge-reranker) ]
             (Re-scores and filters top docs)
                            │
-                     (Top 3 Docs)
+                     (Top 10 Docs)
                            │
                            ▼
                     [ Groq LLM ] 
@@ -139,18 +139,32 @@ Create a `.env` file in the root directory and add your Groq API Key:
 GROQ_API_KEY=your_groq_api_key_here
 ```
 
-### Installation
+### Usage
 
 **Step 4: Data Ingestion (Create Vector DB)**
+
+Put your source documents in `data/raw/`, then build both the Chroma and BM25 indexes:
+
 ```bash
-python src/vector_db.py
+python -m scripts.ingest
 ```
-*This will create the `chroma_db` directory and `bm25_retriever.pkl.`*
+
+By default, this reads from `data/raw/` and writes:
+- Chroma DB: `data/indexes/chroma_db/`
+- BM25 index: `data/indexes/bm25_retriever.pkl`
+
+You can override paths and chunking settings when needed:
+
+```bash
+python -m scripts.ingest --data-dir data/raw --chunk-size 1000 --chunk-overlap 200
+```
 
 **Step 5: Run the Chatbot UI**
+
 ```bash
-streamlit run app.py
+python -m streamlit run .\app\streamlit_app.py
 ```
+
 Access the application in your browser at http://localhost:8501.
 
 **Step 6: Run System Evaluation (Optional)**
@@ -159,11 +173,11 @@ Evaluate the pipeline's accuracy using the built-in AI Judge:
 
 ```bash
 # Run evaluation with the default question set
-python evaluate.py
+python -m scripts.evaluate
 
 # View detailed results for each question
-python evaluate.py --verbose
+python -m scripts.evaluate --verbose
 
 # Save results to a CSV file
-python evaluate.py --output results.csv
+python -m scripts.evaluate --output results.csv
 ```

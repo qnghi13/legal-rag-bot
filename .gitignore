@@ -4,4 +4,8 @@ task.md
 .env
 *.pkl
 chroma_db/
+data/indexes/
+data/processed/
 .DS_Store
+AGENT.md
+tests/
