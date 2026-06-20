@@ -12,6 +12,7 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from src.chunking.markdown_chunker import split_markdown_by_headers
+from src.graph.extractor import extract_graph_from_markdown
 from src.ingestion.text_extractor import normalize_legal_headings
 
 
@@ -83,6 +84,7 @@ def load_and_chunk_folder(
                 markdown,
                 chunk_size=chunk_size,
                 chunk_overlap=chunk_overlap,
+                metadata=doc_metadata,
             )
             for index, chunk in enumerate(chunks):
                 chunk.metadata.update(doc_metadata)
@@ -106,8 +108,17 @@ def _split_legal_markdown(
     *,
     chunk_size: int,
     chunk_overlap: int,
+    metadata: dict[str, Any] | None = None,
 ) -> list[Document]:
     if LEGAL_HEADER_RE.search(markdown):
+        unit_chunks = _split_by_graph_units(
+            markdown,
+            metadata=metadata or {},
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        if unit_chunks:
+            return unit_chunks
         return split_markdown_by_headers(
             markdown,
             chunk_size=chunk_size,
@@ -126,6 +137,52 @@ def _split_legal_markdown(
         separators=["\n\n", "\n", ".", " ", ""],
     )
     return splitter.create_documents([markdown])
+
+
+def _split_by_graph_units(
+    markdown: str,
+    *,
+    metadata: dict[str, Any],
+    chunk_size: int,
+    chunk_overlap: int,
+) -> list[Document]:
+    graph = extract_graph_from_markdown(
+        markdown,
+        metadata,
+        extraction_mode="rule",
+        min_confidence=0.0,
+    )
+    if not graph.clauses:
+        return []
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=["\n\n", "\n", ".", " ", ""],
+    )
+    documents: list[Document] = []
+    for clause in graph.clauses:
+        base_metadata = {
+            "clause_id": clause.id,
+            "unit_id": clause.id,
+            "article_no": clause.article_no,
+            "clause_no": clause.clause_no,
+            "unit_type": clause.unit_type,
+            "structural_path": clause.structural_path,
+            "source_start_line": clause.source_start_line,
+            "source_end_line": clause.source_end_line,
+            "contains_quoted_replacement": clause.contains_quoted_replacement,
+            "target_document_number_hint": clause.target_document_number_hint,
+        }
+        parts = splitter.split_text(clause.text)
+        for part_index, part in enumerate(parts or [clause.text]):
+            documents.append(
+                Document(
+                    page_content=part,
+                    metadata=base_metadata | {"chunk_part": part_index},
+                )
+            )
+    return documents
 
 
 def _resolve_metadata_db(folder: Path, metadata_db: str | None) -> Path | None:

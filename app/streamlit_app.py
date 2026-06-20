@@ -21,7 +21,7 @@ from src.chains.rag_chain import get_hr_bot
 
 @st.cache_resource
 def load_bot():
-    return get_hr_bot()
+    return get_hr_bot(return_context_list=True)
 
 
 def main() -> None:
@@ -57,19 +57,38 @@ def main() -> None:
                     )
 
                     bot_reply = response["answer"]
-                    context_used = response["context"]
+                    dq_context = response.get("dq_context", "")
+                    gq_context = response.get("gq_context", "")
 
                     st.markdown(bot_reply)
 
-                    with st.expander("📄 Xem tài liệu trích xuất"):
-                        if context_used.strip() == "":
-                            st.warning("Không tìm thấy ngữ cảnh nào phù hợp trong PDF.")
-                        else:
+                    with st.expander("📄 Xem ngữ cảnh truy xuất"):
+                        if not dq_context.strip() and not gq_context.strip():
+                            st.warning("Không tìm thấy ngữ cảnh nào phù hợp.")
+                        if dq_context.strip():
                             st.text_area(
-                                "Văn bản AI đã đọc:",
-                                value=context_used,
+                                "Dq - tài liệu truy xuất:",
+                                value=dq_context,
                                 height=250,
                             )
+                        if gq_context.strip():
+                            st.text_area(
+                                "Gq - quan hệ từ graph:",
+                                value=gq_context,
+                                height=250,
+                            )
+
+                    with st.expander("🔎 Trace truy xuất", expanded=False):
+                        dq_trace = response.get("dq_context_trace", [])
+                        gq_trace = response.get("gq_context_trace", [])
+                        if not dq_trace and not gq_trace:
+                            st.info("Không có trace truy xuất.")
+                        if dq_trace:
+                            st.caption("Dq trace")
+                            st.json(dq_trace)
+                        if gq_trace:
+                            st.caption("Gq trace")
+                            st.json(gq_trace)
 
                     st.session_state.messages.append(
                         {"role": "assistant", "content": bot_reply}
