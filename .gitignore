@@ -10,7 +10,7 @@ data/indexes/
 data/processed/
 data/raw/vbpl/
 
-docs/
+my_docs/*
 
 scripts/import_vbpl_metadata.py
 
