@@ -28,7 +28,7 @@ class PathSettings:
 @dataclass(frozen=True)
 class ModelSettings:
     llm_model: str = os.getenv("LEGAL_RAG_LLM_MODEL", "llama-3.1-8b-instant")
-    judge_llm_model: str = os.getenv("LEGAL_RAG_JUDGE_LLM_MODEL", "llama-3.3-70b-versatile")
+    judge_llm_model: str = os.getenv("LEGAL_RAG_JUDGE_LLM_MODEL", "llama-3.1-8b-instant")
     embedding_model: str = os.getenv("LEGAL_RAG_EMBEDDING_MODEL", "keepitreal/vietnamese-sbert")
     reranker_model: str = os.getenv("LEGAL_RAG_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
     reranker_max_length: int = int(os.getenv("LEGAL_RAG_RERANKER_MAX_LENGTH", "512"))
@@ -45,6 +45,8 @@ class RetrievalSettings:
 class ChunkingSettings:
     chunk_size: int = int(os.getenv("LEGAL_RAG_CHUNK_SIZE", "1000"))
     chunk_overlap: int = int(os.getenv("LEGAL_RAG_CHUNK_OVERLAP", "200"))
+    embedding_batch_size: int = int(os.getenv("LEGAL_RAG_EMBEDDING_BATCH_SIZE", "32"))
+    chroma_batch_size: int = int(os.getenv("LEGAL_RAG_CHROMA_BATCH_SIZE", "256"))
 
 
 @dataclass(frozen=True)

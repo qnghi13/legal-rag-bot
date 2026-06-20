@@ -141,25 +141,72 @@ GROQ_API_KEY=your_groq_api_key_here
 
 ### Usage
 
-**Step 4: Data Ingestion (Create Vector DB)**
+**Step 4: Crawl VBPL Documents (Optional)**
 
-Put your source documents in `data/raw/`, then build both the Chroma and BM25 indexes:
+You can crawl labor-related legal documents from the Vietnamese national legal database (`vbpl.vn`) before building the indexes:
 
 ```bash
-python -m scripts.ingest
+python -m scripts.crawl_vbpl
 ```
 
-By default, this reads from `data/raw/` and writes:
+By default, the crawler:
+- Searches central legal documents with the keyword `lao động`
+- Filters document types to `Bộ luật`, `Luật`, `Nghị định`, and `Thông tư`
+- Keeps documents that are `Còn hiệu lực` or `Hết hiệu lực một phần`
+- Writes Markdown files to `data/raw/vbpl/markdown/`
+- Stores crawl metadata in `data/raw/vbpl/metadata.sqlite`
+
+Useful options:
+
+```bash
+# Crawl only a small sample
+python -m scripts.crawl_vbpl --max-docs 10
+
+# Search more broadly across VBPL quick-search results
+python -m scripts.crawl_vbpl --keyword-scope all
+
+# Also export metadata JSON files for debugging or sharing
+python -m scripts.crawl_vbpl --write-json
+```
+
+If you already have older JSON metadata files, import them into the SQLite registry:
+
+```bash
+python -m scripts.import_vbpl_metadata --json-dir data/raw/vbpl/json --metadata-db data/raw/vbpl/metadata.sqlite
+```
+
+**Step 5: Data Ingestion (Create Vector DB)**
+
+Build both the Chroma and BM25 indexes from the crawled Markdown files and the
+SQLite metadata registry:
+
+```bash
+python -m scripts.ingest --data-dir data/raw/vbpl/markdown --metadata-db data/raw/vbpl/metadata.sqlite
+```
+
+The ingestion step reads `.md` files, merges document metadata from SQLite, removes
+the document preamble before the first legal heading, and preserves legal header
+metadata such as `Chuong`, `Muc`, `Dieu`, and `Khoan` on each chunk. Files without
+legal Markdown headings fall back to recursive character splitting.
+
+By default, indexes are written to:
 - Chroma DB: `data/indexes/chroma_db/`
 - BM25 index: `data/indexes/bm25_retriever.pkl`
 
 You can override paths and chunking settings when needed:
 
 ```bash
-python -m scripts.ingest --data-dir data/raw --chunk-size 1000 --chunk-overlap 200
+python -m scripts.ingest --data-dir data/raw/vbpl/markdown --chunk-size 1000 --chunk-overlap 200
 ```
 
-**Step 5: Run the Chatbot UI**
+For faster indexing, tune embedding and Chroma write batches based on your
+hardware:
+
+```bash
+python -m scripts.ingest --data-dir data/raw/vbpl/markdown --metadata-db data/raw/vbpl/metadata.sqlite --embedding-batch-size 64 --chroma-batch-size 512
+```
+
+**Step 6: Run the Chatbot UI**
 
 ```bash
 python -m streamlit run .\app\streamlit_app.py
@@ -167,7 +214,7 @@ python -m streamlit run .\app\streamlit_app.py
 
 Access the application in your browser at http://localhost:8501.
 
-**Step 6: Run System Evaluation (Optional)**
+**Step 7: Run System Evaluation (Optional)**
 
 Evaluate the pipeline's accuracy using the built-in AI Judge:
 
