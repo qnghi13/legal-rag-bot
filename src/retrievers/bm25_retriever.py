@@ -7,6 +7,8 @@ from pathlib import Path
 
 from langchain_core.documents import Document
 
+from src.retrievers.scored import ScoredDocument, clone_document
+
 _BM25_CACHE: dict[str, object] = {}
 
 
@@ -28,7 +30,68 @@ class BM25RetrieverAdapter:
         self._retriever = retriever
 
     def retrieve(self, query: str, top_k: int) -> list[Document]:
+        return [item.document for item in self.retrieve_with_scores(query, top_k)]
+
+    def retrieve_with_scores(self, query: str, top_k: int) -> list[ScoredDocument]:
+        scored = self._rank_with_scores(query, top_k)
+        if scored is None:
+            return self._fallback_rank(query, top_k)
+        return scored
+
+    def _rank_with_scores(self, query: str, top_k: int) -> list[ScoredDocument] | None:
+        vectorizer = getattr(self._retriever, "vectorizer", None)
+        docs = getattr(self._retriever, "docs", None)
+        preprocess_func = getattr(self._retriever, "preprocess_func", None)
+        if vectorizer is None or docs is None or preprocess_func is None:
+            return None
+        if not hasattr(vectorizer, "get_scores"):
+            return None
+
+        processed_query = preprocess_func(query)
+        scores = vectorizer.get_scores(processed_query)
+        ranked = sorted(
+            enumerate(scores),
+            key=lambda item: float(item[1]),
+            reverse=True,
+        )[:top_k]
+        scored_docs: list[ScoredDocument] = []
+        for rank, (doc_index, score) in enumerate(ranked, start=1):
+            raw_score = float(score)
+            doc = docs[doc_index]
+            scored_docs.append(
+                ScoredDocument(
+                    document=clone_document(
+                        doc,
+                        {
+                            "source_retriever": "bm25",
+                            "original_rank": rank,
+                            "raw_score": raw_score,
+                        },
+                    ),
+                    source_retriever="bm25",
+                    original_rank=rank,
+                    raw_score=raw_score,
+                )
+            )
+        return scored_docs
+
+    def _fallback_rank(self, query: str, top_k: int) -> list[ScoredDocument]:
         if hasattr(self._retriever, "k"):
             self._retriever.k = top_k
-        return self._retriever.invoke(query)[:top_k]
-
+        docs = self._retriever.invoke(query)[:top_k]
+        return [
+            ScoredDocument(
+                document=clone_document(
+                    doc,
+                    {
+                        "source_retriever": "bm25",
+                        "original_rank": rank,
+                        "raw_score": None,
+                    },
+                ),
+                source_retriever="bm25",
+                original_rank=rank,
+                raw_score=None,
+            )
+            for rank, doc in enumerate(docs, start=1)
+        ]

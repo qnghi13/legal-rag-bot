@@ -26,6 +26,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reranker-max-length", type=int, default=DEFAULT_CONFIG.models.reranker_max_length)
     parser.add_argument("--retrieval-k", type=int, default=DEFAULT_CONFIG.retrieval.retrieval_k)
     parser.add_argument("--rerank-top-k", type=int, default=DEFAULT_CONFIG.retrieval.rerank_top_k)
+    parser.add_argument("--rrf-k", type=int, default=DEFAULT_CONFIG.retrieval.rrf_k)
+    parser.add_argument("--semantic-weight", type=float, default=DEFAULT_CONFIG.retrieval.semantic_weight)
+    parser.add_argument("--bm25-weight", type=float, default=DEFAULT_CONFIG.retrieval.bm25_weight)
+    parser.add_argument("--rerank-min-score", type=float, default=DEFAULT_CONFIG.retrieval.rerank_min_score)
     parser.add_argument("--chroma-path", default=None)
     parser.add_argument("--bm25-path", default=None)
     parser.add_argument("--judge-llm", default=DEFAULT_CONFIG.models.judge_llm_model)
@@ -48,6 +52,10 @@ def main() -> None:
         reranker_max_length=args.reranker_max_length,
         retrieval_k=args.retrieval_k,
         rerank_top_k=args.rerank_top_k,
+        rrf_k=args.rrf_k,
+        semantic_weight=args.semantic_weight,
+        bm25_weight=args.bm25_weight,
+        rerank_min_score=args.rerank_min_score,
         chroma_path=args.chroma_path,
         bm25_path=args.bm25_path,
         judge_llm=args.judge_llm,

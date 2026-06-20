@@ -10,6 +10,8 @@ data/indexes/
 data/processed/
 data/raw/vbpl/
 
+my_docs/*
+
 scripts/import_vbpl_metadata.py
 
 .DS_Store

@@ -1,230 +1,318 @@
 # Legal RAG Bot - Vietnamese Labor Law Assistant
 
-An advanced, AI-powered conversational agent designed to provide highly accurate, context-grounded legal advice regarding Vietnamese Labor Law. Built on a state-of-the-art **Retrieval-Augmented Generation (RAG)** architecture, it ensures that all answers are strictly based on actual legal texts, preventing AI hallucinations.
+An AI-powered conversational assistant for Vietnamese labor law. The system is built around **Retrieval-Augmented Generation (RAG)**, but the current implementation is no longer a plain vector-only RAG: it combines Chroma semantic retrieval, BM25 keyword retrieval, cross-encoder reranking, optional Neo4j graph expansion, Groq generation, and rule-based answer verification.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
 ![LangChain](https://img.shields.io/badge/LangChain-Enabled-green)
 ![Streamlit](https://img.shields.io/badge/Streamlit-UI-red)
 ![Groq](https://img.shields.io/badge/Groq-LLM-orange)
+![Neo4j](https://img.shields.io/badge/Neo4j-Graph%20Retrieval-blue)
 
 ---
 
 ## 1. Project Overview
-Understanding labor law can be difficult for students who have never worked before and for people who are just entering the job market. Important topics such as employment contracts, probation periods, overtime regulations, salaries, insurance, and employee rights are often buried inside long and complex legal documents written in formal language.
 
-The **Legal RAG Bot** was built to make Vietnamese labor law more accessible and easier to understand. By ingesting raw legal documents such as PDFs, text files, and scanned images, the system can understand the hierarchical structure of legal documents (Chapters, Sections, Articles, Clauses) and provide accurate, context-aware answers to user questions. This helps students and new employees quickly find reliable legal information without needing to manually search through hundreds of pages of regulations.
+Understanding labor law can be difficult for students, new employees, and people who need quick answers from long legal documents. Topics such as employment contracts, probation, overtime, salaries, insurance, vocational training, employee rights, and employer obligations are often spread across laws, decrees, circulars, amendments, and guidance documents.
 
-When a user asks a question, the system searches its database, retrieves the most relevant legal clauses, and uses high-speed Large Language Models (**Groq**) to synthesize a coherent, accurate, and professional answer.
+The **Legal RAG Bot** makes Vietnamese labor law easier to search and understand. It crawls labor-related legal documents from VBPL, converts them into structured Markdown, chunks them by legal units such as `Điều` and `Khoản`, builds text retrieval indexes, and can build a retrieval-oriented Neo4j graph for legal relations such as amendment, repeal, replacement, guidance, detailed regulation, legal basis, citation, and reference.
+
+When a user asks a question, the system rewrites the query if chat history is relevant, retrieves direct legal text, optionally expands through Neo4j legal relations, separates evidence into `Dq` textual context and `Gq` graph context, asks the LLM to answer only from the retrieved context, and verifies that generated citations are supported before returning the final answer.
 
 ## 2. Current Features
-- **Intelligent Data Ingestion & OCR:** Automatically converts PDFs to Markdown. If a scanned PDF is detected, it triggers Tesseract OCR to extract text from images.
-- **Semantic Chunking:** Preserves the legal context by splitting documents based on Markdown headers (Chapter, Section, Article, Clause) rather than blind character counts.
-- **Hybrid Search (Retrieval):** Combines Semantic Search (Dense retrieval via **ChromaDB** & `vi-sbert`) with Keyword Search (Sparse retrieval via **BM25**) to maximize finding exact legal matches.
-- **Cross-Encoder Re-ranking:** Uses `BAAI/bge-reranker-v2-m3` to re-score and filter the retrieved documents, ensuring only the most highly relevant context is sent to the LLM.
-- **Conversational Memory:** Automatically rephrases user queries based on chat history to maintain context in multi-turn conversations.
-- **Strict Guardrails:** The LLM is strictly prompted to answer *only* using the provided context. If the law doesn't cover the user's question, the bot safely declines to answer.
-- **Built-in RAG Evaluation:** Integrated with the **Ragas** framework to automatically evaluate the pipeline's performance across metrics like Faithfulness, Answer Relevancy, Context Precision, and Context Recall.
 
+- **VBPL crawling and Markdown export:** Crawls labor-related documents from `vbpl.vn`, writes Markdown to `data/raw/vbpl/markdown/`, and stores crawl metadata in `data/raw/vbpl/metadata.sqlite`.
+- **Legal-unit chunking:** Normalizes Vietnamese legal headings, strips preamble before the first legal heading, and chunks documents by article/clause-level legal units when possible.
+- **Hybrid text retrieval:** Combines Chroma semantic retrieval using `keepitreal/vietnamese-sbert` with BM25 keyword retrieval, then fuses and deduplicates candidates.
+- **Cross-encoder reranking:** Uses `BAAI/bge-reranker-v2-m3` to rerank retrieved candidates before generation.
+- **Neo4j graph retrieval:** Optionally builds and queries a retrieval-only legal graph with `LegalUnit` nodes and relation types such as `AMENDS`, `SUPPLEMENTS`, `REPEALS`, `REPLACES`, `GUIDES`, `DETAILS`, `BASED_ON`, `CITES`, and `REFERS_TO`.
+- **Query-anchor resolution:** Detects explicit legal references in the user query, such as document/article/clause anchors, and retrieves matching legal units when Neo4j is available.
+- **Dq/Gq context split:** Sends direct textual evidence as `Dq` and graph relation evidence as `Gq`, so the prompt can distinguish answer evidence from relationship context.
+- **Conversational query rewriting:** Rewrites follow-up questions into standalone legal questions using chat history.
+- **Strict prompt guardrails:** The prompt instructs the model to answer from `Dq`, use `Gq` only as relation/status support, and return the fallback answer when evidence is missing.
+- **Post-generation answer verification:** Rejects answers without citations or with unsupported citations, then falls back to `NO_CONTEXT_ANSWER`.
+- **Streamlit UI with trace inspection:** Shows the final answer, retrieved `Dq/Gq` context, and retrieval trace JSON.
+- **Ragas evaluation entrypoint:** Provides `scripts.evaluate` for evaluation with configurable retrieval, reranking, and judge model settings.
 
 ## 3. Architecture
-The system architecture is divided into two main phases: **Data Preparation (Offline)** and the **RAG Pipeline (Online)**.
+
+The system architecture has two main phases: **Data Preparation (Offline)** and **RAG Query Pipeline (Online)**.
 
 ### Phase 1: Data Preparation (Offline)
-This pipeline is executed whenever new legal documents are added to the system.
+
+This pipeline is executed when the legal corpus or indexes need to be refreshed.
+
 ```text
 ===================================================================
-           PHASE 1: INGESTION PIPELINE
+           PHASE 1: INGESTION AND GRAPH BUILD
 ===================================================================
 
-       [ Raw Legal Documents (PDFs, Scans, TXT) ]
-                           │
-                           ▼
-       [ Text Extraction (PyMuPDF4LLM / Tesseract OCR) ]
-                           │
-                           ▼
-       [ Semantic Chunking (Split by Chương, Mục, Điều, Khoản) ]
-                           │
-             ┌─────────────┴─────────────┐
-             ▼                           ▼
-      [ vi-sbert Embeddings ]     [ Keyword Indexer ]
-             │                           │
-             ▼                           ▼
-       [( Chroma DB )]            [( BM25 Pickle )]
-       (Dense Vectors)            (Sparse Keywords)
+          [ VBPL public legal documents ]
+                         |
+                         v
+              [ scripts.crawl_vbpl ]
+                         |
+          +--------------+---------------+
+          |                              |
+          v                              v
+[ data/raw/vbpl/markdown/*.md ]  [ metadata.sqlite ]
+          |                              |
+          +--------------+---------------+
+                         |
+                         v
+          [ normalize headings + merge metadata ]
+                         |
+                         v
+          [ legal-unit chunking by Điều/Khoản ]
+                         |
+          +--------------+-----------------------------+
+          |                                            |
+          v                                            v
+ [ BM25 keyword index ]                    [ Chroma semantic index ]
+ data/indexes/bm25_retriever.pkl          data/indexes/chroma_db/
+          |
+          | optional: --build-graph
+          v
+ [ rule/hybrid graph extraction + audit ]
+          |
+          v
+ [ Neo4j retrieval graph: LegalUnit + legal relations ]
 ```
-### Phase 2: RAG Pipeline (Online):
-This pipeline runs in real-time when a user interacts with the Chatbot UI.
+
+Important implementation notes:
+
+- `scripts.ingest` consumes existing Markdown; it does not crawl VBPL and does not regenerate Markdown.
+- `--build-graph` adds graph extraction and Neo4j upsert after BM25/Chroma indexing.
+- `--reset-graph` clears Neo4j legal graph nodes before graph rebuild, but the ingest command still rebuilds BM25 and writes Chroma chunks. There is no graph-only ingest mode yet.
+- `--graph-extraction-mode rule` avoids LLM extraction and is the recommended deterministic rebuild mode.
+
+### Phase 2: RAG Query Pipeline (Online)
+
+This pipeline runs when a user interacts with the Streamlit chatbot.
+
 ```text
 ===================================================================
            PHASE 2: QUERY PIPELINE
 ===================================================================
 
-                    [ User Input ]
-                           │
-                           ▼
-                  [ Query Rephraser ] ◄──────── (Chat History)
-                           │
-                  (Standalone Query)
-                           │
-             ┌─────────────┴─────────────┐
-             ▼                           ▼
-       [ Chroma DB ]               [ BM25 Pickle ]
-      (Dense Search)               (Sparse Search)
-             │                           │
-             └─────────────┬─────────────┘
-                           ▼
-               [ Merge & Deduplicate ]
-                           │
-                           ▼
-          [ Cross-Encoder (BAAI/bge-reranker) ]
-            (Re-scores and filters top docs)
-                           │
-                     (Top 10 Docs)
-                           │
-                           ▼
-                    [ Groq LLM ] 
-             (Strict Guardrail Prompt)
-                           │
-                           ▼
-            [ Final Answer + Source Context ]
-                    (Streamlit UI)
+              [ User Input + Chat History ]
+                         |
+                         v
+                 [ Query Rewriter ]
+                         |
+                 (standalone query)
+                         |
+          +--------------+---------------+
+          |                              |
+          v                              v
+ [ Chroma semantic search ]       [ BM25 keyword search ]
+          |                              |
+          +--------------+---------------+
+                         |
+                         v
+          [ Hybrid fusion + deduplication ]
+                         |
+                         v
+          [ Cross-encoder reranker ]
+                         |
+                         v
+          [ Optional Neo4j graph expansion ]
+                         |
+                         v
+          [ Split context into Dq and Gq ]
+                         |
+                         v
+          [ Groq LLM with strict legal prompt ]
+                         |
+                         v
+          [ Citation verifier ]
+                         |
+                         v
+          [ Final answer + context trace in Streamlit ]
 ```
 
-## 4. Future Improvements
-While the current RAG pipeline is robust, the following advanced features are planned for future releases to achieve enterprise-level accuracy and reasoning:
+Detailed design documents:
 
-- **Structured Legal Parsing:** Enhance the parsing engine to better understand and map the relationships between Laws, Decrees, and Circulars.
-- **Neo4j Graph Retrieval:** Transition to Knowledge Graph RAG (GraphRAG) to understand the relational context (e.g., "Article X is modified by Decree Y").
-- **Advanced Reranking fine-tuning:** Fine-tune domain-specific Vietnamese legal cross-encoders to improve the current reranking precision.
-- **Continuous RAG Evaluation:** Integrate the Ragas evaluation script into a CI/CD pipeline to automatically benchmark the system whenever the document base or prompts are updated.
-- **Citation Grounding:** Implement mechanisms in the UI to highlight the exact sentences/words in the source text that the LLM used to construct its answer.
-- **Agentic Workflow:** Upgrade from a static LCEL chain to a dynamic **LangGraph** agent. This will allow the bot to route queries, perform web searches for recent news if the DB lacks info, and handle multi-step legal reasoning.
+- [Current Architecture](docs/current_architecture.md)
+- [Ingestion And Rebuild](docs/current_ingestion_rebuild.md)
+- [Retrieval Context Contract](docs/current_retrieval_contract.md)
+- [Neo4j Graph Design](docs/current_neo4j_graph_design.md)
+
+## 4. Future Improvements
+
+The current system already supports hybrid retrieval, graph expansion, context tracing, and citation verification. The next improvements should focus on robustness, deployment, and stronger evaluation:
+
+- **Local LLM support:** Add a local structured-output model for graph extraction and/or answer generation, such as a Qwen instruct model served through Ollama or vLLM, to reduce API dependency and rate-limit risk.
+- **Production web app:** Move beyond the current Streamlit prototype toward a full web application with authentication, saved conversations, admin corpus controls, and richer citation browsing.
+- **Graph-only maintenance mode:** Add `--graph-only` or `--skip-vector` so Neo4j can be rebuilt without rewriting BM25/Chroma artifacts.
+- **Graph relation ranking:** Score graph evidence by relation type, confidence, direction, recency, and whether the target document is resolved.
+- **Better graph extraction evaluation:** Build hand-labeled relation fixtures and report relation precision/recall for amendment, repeal, replacement, guidance, and reference cases.
+- **Ablation evaluation:** Compare BM25-only, dense-only, hybrid, hybrid + rerank, hybrid + graph, and hybrid + graph + verifier.
+- **Domain-specific embeddings/rerankers:** Evaluate Vietnamese legal embedding and reranking models against the current `keepitreal/vietnamese-sbert` and `BAAI/bge-reranker-v2-m3`.
+- **Improved citation UI:** Highlight the exact `Điều`, `Khoản`, document, and graph relation supporting each answer sentence.
+- **Agentic/legal workflow routing:** Add routing for query types such as direct legal lookup, relation-heavy lookup, corpus gap detection, and future web search for out-of-corpus recent updates.
 
 ## 5. Demo
 
 | Chat Interface | Context Verification |
 | :---: | :---: |
 | <img src="./image/QA.png"> | <img src="./image/citation.png" alt="Context UI"> |
-| *Smooth conversational UI with Groq LLM* | *Users can inspect the exact legal clauses used* |
+| *Conversational UI with Groq LLM* | *Users can inspect retrieved legal context* |
 
 ## 6. Setup
 
 ### Prerequisites
-Because this project handles deep PDF extraction and Scanned documents, you **must** install the following system dependencies before installing Python packages:
-1. **Tesseract OCR:** 
-   - Windows: [Download Installer](https://github.com/UB-Mannheim/tesseract/wiki). Ensure it's installed at `C:\Program Files\Tesseract-OCR\tesseract.exe`.
+
+Install Python dependencies in a virtual environment. Tesseract OCR is only needed when using OCR/PDF scan extraction paths; the current VBPL Markdown pipeline does not require OCR for normal crawl/index runs.
+
+Optional OCR dependency:
+
+1. **Tesseract OCR**
+   - Windows: install from the UB Mannheim Tesseract build and ensure `tesseract.exe` is available.
    - Linux: `sudo apt-get install tesseract-ocr`
-   - Mac: `brew install tesseract`
+   - macOS: `brew install tesseract`
+
+Optional graph dependency:
+
+1. **Neo4j**
+   - Default URI: `bolt://localhost:7687`
+   - Configure credentials through `.env`.
 
 ### Installation
 
 **Step 1: Clone the repository**
+
 ```bash
 git clone <your-repo-url>
 cd <your-project-folder>
 ```
 
-**Step 2: Create a virtual environment & Install dependencies**
-```bash
+**Step 2: Create a virtual environment and install dependencies**
+
+```powershell
 python -m venv venv
-source venv/bin/activate  # On Windows use: venv\Scripts\activate
-pip install -r requirements.txt
+.\venv\Scripts\activate
+python -m pip install -r requirements.txt
 ```
 
-**Step 3: Environment Variables**
+**Step 3: Environment variables**
 
-Create a `.env` file in the root directory and add your Groq API Key:
+Create a `.env` file in the root directory:
 
-```bash
+```env
 GROQ_API_KEY=your_groq_api_key_here
+
+LEGAL_RAG_LLM_MODEL=llama-3.1-8b-instant
+LEGAL_RAG_EMBEDDING_MODEL=keepitreal/vietnamese-sbert
+LEGAL_RAG_RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+
+LEGAL_RAG_GRAPH_ENABLED=true
+LEGAL_RAG_NEO4J_URI=bolt://localhost:7687
+LEGAL_RAG_NEO4J_USER=neo4j
+LEGAL_RAG_NEO4J_PASSWORD=your_neo4j_password
+LEGAL_RAG_GRAPH_EXTRACTION_MODE=hybrid
 ```
+
+If Neo4j is unavailable, the runtime chain disables graph retrieval for that chain instance and continues with hybrid text retrieval.
 
 ### Usage
 
-**Step 4: Crawl VBPL Documents (Optional)**
+**Step 4: Crawl VBPL documents**
 
-You can crawl labor-related legal documents from the Vietnamese national legal database (`vbpl.vn`) before building the indexes:
-
-```bash
-python -m scripts.crawl_vbpl
+```powershell
+.\venv\Scripts\python.exe -m scripts.crawl_vbpl
 ```
 
 By default, the crawler:
-- Searches central legal documents with the keyword `lao động`
-- Filters document types to `Bộ luật`, `Luật`, `Nghị định`, and `Thông tư`
-- Keeps documents that are `Còn hiệu lực` or `Hết hiệu lực một phần`
-- Writes Markdown files to `data/raw/vbpl/markdown/`
-- Stores crawl metadata in `data/raw/vbpl/metadata.sqlite`
+
+- searches central legal documents with the keyword `lao động`,
+- filters document types to `Bộ luật`, `Luật`, `Nghị định`, and `Thông tư`,
+- writes Markdown files to `data/raw/vbpl/markdown/`,
+- stores crawl metadata in `data/raw/vbpl/metadata.sqlite`.
 
 Useful options:
 
-```bash
+```powershell
 # Crawl only a small sample
-python -m scripts.crawl_vbpl --max-docs 10
+.\venv\Scripts\python.exe -m scripts.crawl_vbpl --max-docs 10
 
 # Search more broadly across VBPL quick-search results
-python -m scripts.crawl_vbpl --keyword-scope all
+.\venv\Scripts\python.exe -m scripts.crawl_vbpl --keyword-scope all
 
-# Also export metadata JSON files for debugging or sharing
-python -m scripts.crawl_vbpl --write-json
+# Also export metadata JSON files
+.\venv\Scripts\python.exe -m scripts.crawl_vbpl --write-json
 ```
 
-If you already have older JSON metadata files, import them into the SQLite registry:
+**Step 5: Build retrieval indexes**
 
-```bash
-python -m scripts.import_vbpl_metadata --json-dir data/raw/vbpl/json --metadata-db data/raw/vbpl/metadata.sqlite
+Build Chroma and BM25 from the crawled Markdown files:
+
+```powershell
+.\venv\Scripts\python.exe -m scripts.ingest `
+  --data-dir data/raw/vbpl/markdown `
+  --metadata-db data/raw/vbpl/metadata.sqlite
 ```
 
-**Step 5: Data Ingestion (Create Vector DB)**
+Build Chroma, BM25, and Neo4j graph with rule-only extraction:
 
-Build both the Chroma and BM25 indexes from the crawled Markdown files and the
-SQLite metadata registry:
-
-```bash
-python -m scripts.ingest --data-dir data/raw/vbpl/markdown --metadata-db data/raw/vbpl/metadata.sqlite
+```powershell
+.\venv\Scripts\python.exe -m scripts.ingest `
+  --data-dir data/raw/vbpl/markdown `
+  --metadata-db data/raw/vbpl/metadata.sqlite `
+  --build-graph `
+  --graph-extraction-mode rule `
+  --graph-audit-output data/indexes/graph_extraction_audit.json
 ```
 
-The ingestion step reads `.md` files, merges document metadata from SQLite, removes
-the document preamble before the first legal heading, and preserves legal header
-metadata such as `Chuong`, `Muc`, `Dieu`, and `Khoan` on each chunk. Files without
-legal Markdown headings fall back to recursive character splitting.
+Reset Neo4j legal graph nodes before rebuilding graph facts:
+
+```powershell
+.\venv\Scripts\python.exe -m scripts.ingest `
+  --data-dir data/raw/vbpl/markdown `
+  --metadata-db data/raw/vbpl/metadata.sqlite `
+  --build-graph `
+  --reset-graph `
+  --graph-extraction-mode rule `
+  --graph-audit-output data/indexes/graph_extraction_audit.json
+```
 
 By default, indexes are written to:
+
 - Chroma DB: `data/indexes/chroma_db/`
 - BM25 index: `data/indexes/bm25_retriever.pkl`
 
-You can override paths and chunking settings when needed:
+You can tune chunking and write batches:
 
-```bash
-python -m scripts.ingest --data-dir data/raw/vbpl/markdown --chunk-size 1000 --chunk-overlap 200
-```
-
-For faster indexing, tune embedding and Chroma write batches based on your
-hardware:
-
-```bash
-python -m scripts.ingest --data-dir data/raw/vbpl/markdown --metadata-db data/raw/vbpl/metadata.sqlite --embedding-batch-size 64 --chroma-batch-size 512
+```powershell
+.\venv\Scripts\python.exe -m scripts.ingest `
+  --data-dir data/raw/vbpl/markdown `
+  --metadata-db data/raw/vbpl/metadata.sqlite `
+  --chunk-size 1000 `
+  --chunk-overlap 200 `
+  --embedding-batch-size 64 `
+  --chroma-batch-size 512
 ```
 
 **Step 6: Run the Chatbot UI**
 
-```bash
-python -m streamlit run .\app\streamlit_app.py
+```powershell
+.\venv\Scripts\python.exe -m streamlit run .\app\streamlit_app.py
 ```
 
-Access the application in your browser at http://localhost:8501.
+Access the application at `http://localhost:8501`.
 
-**Step 7: Run System Evaluation (Optional)**
+**Step 7: Run evaluation or regression checks**
 
-Evaluate the pipeline's accuracy using the built-in AI Judge:
+Evaluate the pipeline with Ragas:
 
-```bash
-# Run evaluation with the default question set
-python -m scripts.evaluate
+```powershell
+.\venv\Scripts\python.exe -m scripts.evaluate
+.\venv\Scripts\python.exe -m scripts.evaluate --verbose
+.\venv\Scripts\python.exe -m scripts.evaluate --output results.csv
+```
 
-# View detailed results for each question
-python -m scripts.evaluate --verbose
+Focused regression checks:
 
-# Save results to a CSV file
-python -m scripts.evaluate --output results.csv
+```powershell
+.\venv\Scripts\python.exe -m pytest tests/test_answer_verifier.py tests/test_legal_retrieval.py tests/test_legal_chunking.py tests/graph -q
+.\venv\Scripts\python.exe -m compileall src scripts tests
 ```

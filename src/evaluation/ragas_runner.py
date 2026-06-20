@@ -27,6 +27,10 @@ class EvaluationRunner:
     reranker_max_length: int = DEFAULT_CONFIG.models.reranker_max_length
     retrieval_k: int = DEFAULT_CONFIG.retrieval.retrieval_k
     rerank_top_k: int = DEFAULT_CONFIG.retrieval.rerank_top_k
+    rrf_k: int = DEFAULT_CONFIG.retrieval.rrf_k
+    semantic_weight: float = DEFAULT_CONFIG.retrieval.semantic_weight
+    bm25_weight: float = DEFAULT_CONFIG.retrieval.bm25_weight
+    rerank_min_score: float | None = DEFAULT_CONFIG.retrieval.rerank_min_score
     chroma_path: str | None = None
     bm25_path: str | None = None
     judge_llm: str = DEFAULT_CONFIG.models.judge_llm_model
@@ -66,6 +70,10 @@ class EvaluationRunner:
             reranker_max_length=self.reranker_max_length,
             retrieval_k=self.retrieval_k,
             rerank_top_k=self.rerank_top_k,
+            rrf_k=self.rrf_k,
+            semantic_weight=self.semantic_weight,
+            bm25_weight=self.bm25_weight,
+            rerank_min_score=self.rerank_min_score,
             chroma_path=self.chroma_path,
             bm25_path=self.bm25_path,
             return_context_list=True,
@@ -77,7 +85,7 @@ class EvaluationRunner:
             print(f"[eval] Running {index}/{len(questions_list)}")
             response = rag_chain.invoke({"input": question, "chat_history": []})
             answers.append(response["answer"])
-            contexts.append(response.get("context_list", []))
+            contexts.append(response.get("dq_context_list", []))
 
         eval_data = {
             "question": questions_list,

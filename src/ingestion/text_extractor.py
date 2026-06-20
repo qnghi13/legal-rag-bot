@@ -14,6 +14,7 @@ _ARTICLE_RE = re.compile(r"^Điều\s+\d+[a-zA-Z]?\.\s+.*", re.IGNORECASE)
 _CLAUSE_RE = re.compile(r"^(\d{1,3})\.(?:\s+(.+)|\s*)$")
 _CLAUSE_HEADING_RE = re.compile(r"^Khoản\s+(\d{1,3})(?:\.\s*(.*)|\s*)$", re.IGNORECASE)
 _SEPARATOR_RE = re.compile(r"^-{3,}$")
+_TRAILING_QUOTE_PUNCTUATION = ".,;:"
 
 
 def normalize_legal_headings(text: str) -> str:
@@ -22,14 +23,29 @@ def normalize_legal_headings(text: str) -> str:
     lines = [_strip_markdown_heading_markup(line) for line in text.splitlines()]
     normalized: list[str] = []
     in_article = False
+    in_quote = False
     index = 0
 
     while index < len(lines):
         line = lines[index]
         stripped = line.strip()
+        quote_transition = _quote_transition(stripped)
 
         if not stripped:
             normalized.append(line)
+            index += 1
+            continue
+
+        if in_quote:
+            normalized.append(line)
+            if quote_transition in {"close", "single"} or _is_bare_quote(stripped):
+                in_quote = False
+            index += 1
+            continue
+
+        if quote_transition == "open":
+            normalized.append(line)
+            in_quote = True
             index += 1
             continue
 
@@ -77,6 +93,29 @@ def normalize_legal_headings(text: str) -> str:
         index += 1
 
     return "\n".join(normalized)
+
+
+def _quote_transition(line: str) -> str:
+    if not line:
+        return "none"
+
+    opening_chars = ('"', "“", "‘")
+    closing_chars = ('"', "”", "’")
+    closes = line.rstrip(_TRAILING_QUOTE_PUNCTUATION).endswith(closing_chars)
+    opens = line.startswith(opening_chars)
+    has_inline_close = opens and any(char in line[1:] for char in closing_chars)
+
+    if opens and (closes or has_inline_close) and len(line) > 1:
+        return "single"
+    if opens:
+        return "open"
+    if closes:
+        return "close"
+    return "none"
+
+
+def _is_bare_quote(line: str) -> bool:
+    return line in {'"', "“", "”", "‘", "’"}
 
 
 def _strip_markdown_heading_markup(line: str) -> str:
